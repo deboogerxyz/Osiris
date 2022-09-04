@@ -53,6 +53,7 @@ public:
     HookType bspQuery;
     HookType client;
     HookType clientMode;
+    HookType networkChannel;
     HookType engine;
     HookType inventory;
     HookType inventoryManager;

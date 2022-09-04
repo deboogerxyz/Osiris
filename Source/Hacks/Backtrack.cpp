@@ -26,7 +26,14 @@ struct BacktrackConfig {
     int timeLimit = 200;
 } backtrackConfig;
 
+struct Sequence {
+    int inReliableState;
+    int inSequenceNumber;
+    float serverTime;
+};
+
 static std::array<std::deque<Backtrack::Record>, 65> records;
+static std::deque<Sequence> sequences;
 
 struct Cvars {
     ConVar* updateRate;
@@ -170,6 +177,46 @@ bool Backtrack::valid(float simtime) noexcept
     return std::abs(delta) <= 0.2f;
 }
 
+void Backtrack::fakeLatency(NetworkChannel* network) noexcept
+{
+    if (!backtrackConfig.enabled)
+        return;
+
+    if (!network || !cvars.maxUnlag)
+        return;
+
+    const auto latency = std::max(0.f, std::clamp(static_cast<float>(backtrackConfig.timeLimit) / 1000.f - 0.2f, 0.f, cvars.maxUnlag->getFloat()) - network->getLatency(0));
+
+    for (auto& sequence : sequences)
+        if (memory->globalVars->serverTime() - sequence.serverTime >= latency) {
+            network->inReliableState = sequence.inReliableState;
+            network->inSequenceNumber = sequence.inSequenceNumber;
+            break;
+        }
+}
+
+void Backtrack::updateInSequences(NetworkChannel* network) noexcept
+{
+    if (!network)
+        return;
+
+    static auto lastInSequenceNumber = 0;
+
+    if (network->inSequenceNumber != lastInSequenceNumber) {
+        lastInSequenceNumber = network->inSequenceNumber;
+
+        Sequence sequence{ };
+        sequence.inReliableState = network->inReliableState;
+        sequence.inSequenceNumber = network->inSequenceNumber;
+        sequence.serverTime = memory->globalVars->serverTime();
+
+        sequences.push_front(sequence);
+    }
+
+    while (sequences.size() > 2048)
+        sequences.pop_back();
+}
+
 void Backtrack::init() noexcept
 {
     cvars.updateRate = interfaces->cvar->findVar("cl_updaterate");
@@ -212,7 +259,7 @@ void Backtrack::drawGUI(bool contentOnly) noexcept
     ImGui::Checkbox("Ignore smoke", &backtrackConfig.ignoreSmoke);
     ImGui::Checkbox("Recoil based fov", &backtrackConfig.recoilBasedFov);
     ImGui::PushItemWidth(220.0f);
-    ImGui::SliderInt("Time limit", &backtrackConfig.timeLimit, 1, 200, "%d ms");
+    ImGui::SliderInt("Time limit", &backtrackConfig.timeLimit, 1, 400, "%d ms");
     ImGui::PopItemWidth();
     if (!contentOnly)
         ImGui::End();

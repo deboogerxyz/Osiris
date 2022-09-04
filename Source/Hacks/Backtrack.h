@@ -10,6 +10,7 @@
 
 namespace csgo { enum class FrameStage; }
 struct UserCmd;
+struct NetworkChannel;
 
 #define OSIRIS_BACKTRACK() true
 
@@ -26,6 +27,8 @@ namespace Backtrack
 
     const std::deque<Record>* getRecords(std::size_t index) noexcept;
     bool valid(float simtime) noexcept;
+    void fakeLatency(NetworkChannel*) noexcept;
+    void updateInSequences(NetworkChannel*) noexcept;
     void init() noexcept;
 
     // GUI

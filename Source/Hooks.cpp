@@ -2,6 +2,7 @@
 #include <functional>
 #include <string>
 
+#include "SDK/NetworkChannel.h"
 #include "imgui/imgui.h"
 
 #ifdef _WIN32
@@ -172,6 +173,24 @@ static void swapWindow(SDL_Window * window) noexcept
 #endif
 }
 
+static int FASTCALL_CONV sendDatagram(NetworkChannel* network, void *data)
+{
+    if (data)
+        return hooks->networkChannel.callOriginal<int, WIN32_LINUX(46, 47)>(data);
+
+    const auto oldInReliableState = network->inReliableState;
+    const auto oldInSequenceNumber = network->inSequenceNumber;
+
+    Backtrack::fakeLatency(network);
+
+    const auto result = hooks->networkChannel.callOriginal<int, WIN32_LINUX(46, 47)>(data);
+
+    network->inReliableState = oldInReliableState;
+    network->inSequenceNumber = oldInSequenceNumber;
+
+    return result;
+}
+
 static bool STDCALL_CONV createMove(LINUX_ARGS(void* thisptr,) float inputSampleTime, UserCmd* cmd) noexcept
 {
     auto result = hooks->clientMode.callOriginal<bool, WIN32_LINUX(24, 25)>(inputSampleTime, cmd);
@@ -223,6 +242,19 @@ static bool STDCALL_CONV createMove(LINUX_ARGS(void* thisptr,) float inputSample
     if (!(cmd->buttons & (UserCmd::IN_ATTACK | UserCmd::IN_ATTACK2))) {
         Misc::chokePackets(sendPacket);
         AntiAim::run(cmd, previousViewAngles, currentViewAngles, sendPacket);
+    }
+
+    if (const auto network = interfaces->engine->getNetworkChannel()) {
+        static NetworkChannel* oldNetwork = nullptr;
+
+        if (network != oldNetwork) {
+            oldNetwork = network;
+            
+            hooks->networkChannel.init(network);
+            hooks->networkChannel.hookAt(WIN32_LINUX(46, 47), sendDatagram);
+        }
+
+        Backtrack::updateInSequences(network);
     }
 
     auto viewAnglesDelta{ cmd->viewangles - previousViewAngles };
@@ -681,6 +713,7 @@ void Hooks::uninstall() noexcept
     bspQuery.restore();
     client.restore();
     clientMode.restore();
+    networkChannel.restore();
     engine.restore();
     inventory.restore();
     inventoryManager.restore();
